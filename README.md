@@ -6,7 +6,7 @@
 
 ## Requirements
 
-- Raspberry Pi 4
+- A machine that can run Linux. For my usecase it will be running on a Raspberry Pi 4.
 - Debian (minimal install)
 - Internet connection
 
