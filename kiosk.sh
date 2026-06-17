@@ -41,7 +41,7 @@ sudo systemctl daemon-reload
 echo "==> Creating ~/.bash_profile..."
 cat > "$HOME/.bash_profile" <<EOF
 if [ -z "\$WAYLAND_DISPLAY" ] && [ "\$(tty)" = "/dev/tty1" ]; then
-    cage -- chromium --kiosk --noerrdialogs  --disable-session-crashed-bubble $KIOSK_URL
+    cage -- chromium --noerrdialogs  --disable-session-crashed-bubble $KIOSK_URL
 fi
 EOF
 
