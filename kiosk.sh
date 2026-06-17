@@ -20,9 +20,11 @@ sudo apt install -y cage chromium seatd
 
 # --- Enable seatd ---
 echo "==> Enabling seatd..."
+sudo groupadd seat
+sudo usermod -aG seat "$KIOSK_USER"
 sudo systemctl enable seatd
 sudo systemctl start seatd
-sudo usermod -aG seat "$KIOSK_USER"
+
 
 # --- Autologin via systemd drop-in ---
 echo "==> Configuring autologin for $KIOSK_USER on tty1..."
@@ -39,7 +41,7 @@ sudo systemctl daemon-reload
 echo "==> Creating ~/.bash_profile..."
 cat > "$HOME/.bash_profile" <<EOF
 if [ -z "\$WAYLAND_DISPLAY" ] && [ "\$(tty)" = "/dev/tty1" ]; then
-    cage -- chromium --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble $KIOSK_URL
+    cage -- chromium --kiosk --noerrdialogs  --disable-session-crashed-bubble $KIOSK_URL
 fi
 EOF
 
