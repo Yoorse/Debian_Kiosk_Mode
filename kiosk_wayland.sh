@@ -176,8 +176,10 @@ rm -f "$KBD_TMP"
 echo "==> Configuring labwc autostart..."
 mkdir -p "$HOME/.config/labwc"
 cat > "$HOME/.config/labwc/autostart" <<EOF
-# Start squeekboard virtual keyboard
-squeekboard &
+# Start squeekboard virtual keyboard.
+# SQUEEKBOARD_KEYBOARDSDIR points it at the kiosk layouts; without it the
+# Raspberry Pi build only looks in /usr/share/misc/squeekboard/keyboards.
+SQUEEKBOARD_KEYBOARDSDIR="$KBD_DIR" squeekboard &
 
 # Start Chromium in kiosk mode
 chromium --kiosk \
