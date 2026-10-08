@@ -5,15 +5,20 @@
 # Chromium opens one pinned tab per URL; a closed tab is reopened and
 # Chromium itself is restarted if it is closed.
 #
-# Usage: ./kiosk.sh URL [URL ...]
+# Usage: set the URLs in KIOSK_URLS below and run ./kiosk.sh
+#        or pass them directly: ./kiosk.sh URL [URL ...]
 
 set -e
 
 # --- Configuration ---
-# One tab per URL, in the order given on the command line.
-KIOSK_URLS=("$@")
-if [ ${#KIOSK_URLS[@]} -eq 0 ]; then
-    KIOSK_URLS=("https://example.com")
+# One tab per URL, in this order. Put each URL in quotes on its own line,
+# with no commas between them.
+KIOSK_URLS=(
+    "https://example.com"
+)
+# URLs given on the command line replace the list above.
+if [ $# -gt 0 ]; then
+    KIOSK_URLS=("$@")
 fi
 KIOSK_USER="$(whoami)"
 # Keyboard layout names the numpad layout is installed under.
