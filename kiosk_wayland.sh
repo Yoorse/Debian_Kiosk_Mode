@@ -182,9 +182,7 @@ cat > "$HOME/.config/labwc/autostart" <<EOF
 SQUEEKBOARD_KEYBOARDSDIR="$KBD_DIR" squeekboard &
 
 # Start Chromium in kiosk mode
-chromium --kiosk \
-  --noerrdialogs \
-  --disable-infobars \
+chromium --disable-infobars \
   --disable-session-crashed-bubble \
   --touch-events=enabled \
   $KIOSK_URL &
