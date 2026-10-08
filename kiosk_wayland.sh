@@ -1,12 +1,20 @@
 #!/bin/bash
 # Kiosk setup script for Raspberry Pi 4 (Debian)
 # Wayland setup using labwc + squeekboard + Chromium
-# Includes autologin, SSH and an on-screen keyboard with a numpad
+# Includes autologin, SSH and an on-screen keyboard with a numpad.
+# Chromium opens one pinned tab per URL; a closed tab is reopened and
+# Chromium itself is restarted if it is closed.
+#
+# Usage: ./kiosk.sh URL [URL ...]
 
 set -e
 
 # --- Configuration ---
-KIOSK_URL="${1:-https://example.com}"
+# One tab per URL, in the order given on the command line.
+KIOSK_URLS=("$@")
+if [ ${#KIOSK_URLS[@]} -eq 0 ]; then
+    KIOSK_URLS=("https://example.com")
+fi
 KIOSK_USER="$(whoami)"
 # Keyboard layout names the numpad layout is installed under.
 # Squeekboard loads the file matching the active layout, so list every
@@ -15,7 +23,9 @@ KIOSK_KBD_LAYOUTS="${KIOSK_KBD_LAYOUTS:-us dk}"
 
 echo "==> Wayland Kiosk setup starting..."
 echo "    User: $KIOSK_USER"
-echo "    URL:  $KIOSK_URL"
+for url in "${KIOSK_URLS[@]}"; do
+    echo "    Tab:  $url"
+done
 echo "    Keyboard layouts: $KIOSK_KBD_LAYOUTS"
 echo ""
 
@@ -172,6 +182,127 @@ for layout in $KIOSK_KBD_LAYOUTS; do
 done
 rm -f "$KBD_TMP"
 
+# --- Install the keep-tabs Chromium extension ---
+# Pins the kiosk tabs (no close button) and reopens one if it is closed.
+echo "==> Installing Chromium keep-tabs extension..."
+EXT_DIR="$HOME/.local/share/kiosk-keep-tabs"
+mkdir -p "$EXT_DIR"
+cat > "$EXT_DIR/manifest.json" <<'JSON'
+{
+  "manifest_version": 3,
+  "name": "Kiosk keep tabs",
+  "version": "1.0",
+  "description": "Pins the kiosk tabs and reopens any of them that gets closed.",
+  "permissions": ["storage"],
+  "background": { "service_worker": "background.js" }
+}
+JSON
+
+cat > "$EXT_DIR/background.js" <<'JS'
+// Kiosk keep tabs
+// The kiosk URLs are listed in urls.json. The first tabs Chromium opens are
+// "adopted" as the kiosk tabs (one per URL, in order) and pinned. If one of
+// them is closed it is reopened in the same place; if it is unpinned it is
+// pinned again. Tabs a user opens themselves are left alone.
+
+const KEY = "kioskTabIds";            // tab id per URL, kept for this browser run
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let failures = 0;
+
+async function loadUrls() {
+  const res = await fetch(chrome.runtime.getURL("urls.json"));
+  return res.json();
+}
+
+async function normalTabs() {
+  const tabs = await chrome.tabs.query({ windowType: "normal" });
+  return tabs.sort((a, b) => a.windowId - b.windowId || a.index - b.index);
+}
+
+async function ensureTabs() {
+  const urls = await loadUrls();
+  const stored = (await chrome.storage.session.get(KEY))[KEY];
+
+  let tabs = await normalTabs();
+  if (!stored) {
+    // First run after Chromium starts: wait for the startup tabs to exist.
+    for (let i = 0; i < 20 && tabs.length < urls.length; i++) {
+      await sleep(250);
+      tabs = await normalTabs();
+    }
+  }
+  // No window left: Chromium is closing, and the kiosk script restarts it.
+  if (tabs.length === 0) return;
+
+  // First run: adopt the startup tabs in order, one per URL.
+  const ids = stored || urls.map((_, i) => (tabs[i] ? tabs[i].id : null));
+  const open = new Map(tabs.map((t) => [t.id, t]));
+  const home = (ids.map((id) => open.get(id)).find(Boolean) || tabs[0]).windowId;
+
+  let failed = false;
+  for (let i = 0; i < urls.length; i++) {
+    try {
+      const tab = ids[i] != null ? open.get(ids[i]) : null;
+      if (tab) {
+        if (!tab.pinned) {
+          await chrome.tabs.update(tab.id, { pinned: true });
+          await chrome.tabs.move(tab.id, { index: i });
+        }
+        continue;
+      }
+      // The tab for this URL is gone: open it again in the same place.
+      const created = await chrome.tabs.create({
+        windowId: home, url: urls[i], index: i, pinned: true, active: false,
+      });
+      ids[i] = created.id;
+    } catch (e) {
+      console.warn("kiosk tabs: could not restore tab", i, e);
+      failed = true;
+    }
+  }
+  await chrome.storage.session.set({ [KEY]: ids });
+
+  // Chromium refuses tab changes for a moment in some cases (for example
+  // while a tab is being dragged), so try again shortly, a limited number
+  // of times.
+  failures = failed ? failures + 1 : 0;
+  if (failed && failures < 30) setTimeout(check, 1000);
+}
+
+// Run one check at a time so two quick closes cannot open duplicates.
+let queue = Promise.resolve();
+function check() {
+  queue = queue.then(ensureTabs).catch((e) => console.error("kiosk tabs:", e));
+  return queue;
+}
+
+chrome.tabs.onRemoved.addListener(() => check());
+chrome.tabs.onUpdated.addListener((_id, change) => {
+  if (change.pinned === false) check();
+});
+chrome.runtime.onStartup.addListener(() => check());
+chrome.runtime.onInstalled.addListener(() => check());
+check();
+JS
+
+# The tab list for the extension (JSON) and for the Chromium command line
+{
+    echo "["
+    sep=""
+    for url in "${KIOSK_URLS[@]}"; do
+        esc=${url//\\/\\\\}
+        esc=${esc//\"/\\\"}
+        printf '%s  "%s"' "$sep" "$esc"
+        sep=$',\n'
+    done
+    printf '\n]\n'
+} > "$EXT_DIR/urls.json"
+
+URL_ARGS=""
+for url in "${KIOSK_URLS[@]}"; do
+    URL_ARGS="$URL_ARGS '${url//\'/\'\\\'\'}'"
+done
+
 # --- Configure labwc autostart ---
 echo "==> Configuring labwc autostart..."
 mkdir -p "$HOME/.config/labwc"
@@ -181,11 +312,18 @@ cat > "$HOME/.config/labwc/autostart" <<EOF
 # Raspberry Pi build only looks in /usr/share/misc/squeekboard/keyboards.
 SQUEEKBOARD_KEYBOARDSDIR="$KBD_DIR" squeekboard &
 
-# Start Chromium in kiosk mode
-chromium --disable-infobars \
-  --disable-session-crashed-bubble \
-  --touch-events=enabled \
-  $KIOSK_URL &
+# Start Chromium with one tab per URL (no --kiosk, so the tab bar shows).
+# The loop starts it again if it is closed or crashes.
+while pgrep -x labwc > /dev/null; do
+  chromium \\
+    --noerrdialogs \\
+    --disable-infobars \\
+    --disable-session-crashed-bubble \\
+    --touch-events=enabled \\
+    --load-extension="$EXT_DIR" \\
+   $URL_ARGS
+  sleep 2
+done &
 EOF
 
 # --- Create ~/.bash_profile to launch labwc on login ---
@@ -200,6 +338,6 @@ echo ""
 echo "==> Done! Please reboot to start kiosk mode:"
 echo "    sudo reboot"
 echo ""
-echo "    To change the URL later, edit ~/.config/labwc/autostart"
+echo "    To change the tabs later, run this script again with the new URLs"
 echo "    To change the on-screen keyboard, edit the files in $KBD_DIR"
 echo "    To manage remotely, SSH in: ssh $KIOSK_USER@<ip-address>"
