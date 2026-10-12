@@ -14,7 +14,7 @@
 # =====================================================================
 set -e
 
-KIOSK_URL="${1:-https://dand-mes.matholdingsinc.com}"
+KIOSK_URL="${1:-https://example.com}"
 KIOSK_USER="$(whoami)"
 KIOSK_DIR="/opt/kiosk"
 BRIDGE_PORT="8765"
