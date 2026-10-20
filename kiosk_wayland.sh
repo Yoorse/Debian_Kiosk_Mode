@@ -26,6 +26,10 @@ KIOSK_USER="$(whoami)"
 # (xontab) that the old Raspbian kiosk used.
 VKB_REPO="${VKB_REPO:-https://github.com/foonerd/chrome-virtual-keyboard-v3}"
 VKB_SRC="$HOME/.local/share/kiosk-virtual-keyboard"
+# Keyboard language. The extension has no Danish layout, so the script
+# adds one (Norwegian layout with æ and ø in Danish order) and locks the
+# keyboard to it.
+VKB_LANG="da"
 
 echo "==> Wayland Kiosk setup starting..."
 echo "    User: $KIOSK_USER"
@@ -70,12 +74,10 @@ sudo systemctl daemon-reload
 
 # --- Install the on-screen keyboard Chromium extension ---
 echo "==> Installing on-screen keyboard extension..."
-if [ -d "$VKB_SRC/.git" ]; then
-    git -C "$VKB_SRC" pull --ff-only
-else
-    rm -rf "$VKB_SRC"
-    git clone --depth 1 "$VKB_REPO" "$VKB_SRC"
-fi
+# Always start from a fresh copy, because the Danish changes below are
+# applied on top of it (a git pull would trip over them).
+rm -rf "$VKB_SRC"
+git clone --depth 1 "$VKB_REPO" "$VKB_SRC"
 
 # The extension may live in the repo root or in a subfolder:
 # use the folder that holds manifest.json.
@@ -90,6 +92,38 @@ if ! grep -q '"manifest_version"[[:space:]]*:[[:space:]]*3' "$VKB_MANIFEST"; the
     exit 1
 fi
 echo "    Keyboard extension: $VKB_DIR"
+
+# --- Danish keyboard layout ---
+echo "==> Adding Danish (DK) keyboard layout..."
+VKB_JS="$VKB_DIR/script.js"
+VKB_NO="$VKB_DIR/layouts/keyboard_no.html"
+VKB_DA="$VKB_DIR/layouts/keyboard_da.html"
+if [ ! -f "$VKB_NO" ] || [ ! -f "$VKB_JS" ]; then
+    echo "!! The keyboard extension has changed layout; cannot add Danish." >&2
+    exit 1
+fi
+
+# Danish = Norwegian with æ and ø swapped (DK: ... k l æ ø).
+# Also fixes the uppercase Æ entity, which is misspelt in the Norwegian file.
+sed -e 's/&oslash;/@@oe@@/g' -e 's/&Oslash;/@@OE@@/g' \
+    -e 's/&aelig;/\&oslash;/g' -e 's/&Aelig;/\&Oslash;/g' -e 's/&AElig;/\&Oslash;/g' \
+    -e 's/@@oe@@/\&aelig;/g' -e 's/@@OE@@/\&AElig;/g' \
+    "$VKB_NO" > "$VKB_DA"
+
+# The extension normally picks its layout from a Volumio setting and falls
+# back to English. Lock it to Danish, make Danish the default and add it to
+# the layout list.
+sed -i \
+    -e "s/virtualKeyboardChromeExtensionKeyboardLayout1Setting = getVolumioKeyboardLayout();/virtualKeyboardChromeExtensionKeyboardLayout1Setting = \"$VKB_LANG\";/" \
+    -e "s/^var DEFAULT_LAYOUT = \"en\";/var DEFAULT_LAYOUT = \"$VKB_LANG\";/" \
+    -e 's/^var ALT_LAYOUTS = \[/&\n    {"value":"da","name":"Dansk"},/' \
+    "$VKB_JS"
+
+if ! grep -q "KeyboardLayout1Setting = \"$VKB_LANG\";" "$VKB_JS" \
+   || ! grep -q '_key="&aelig;"' "$VKB_DA"; then
+    echo "!! Could not switch the keyboard to Danish (the extension's code has changed)." >&2
+    exit 1
+fi
 
 # --- Install the keep-tabs Chromium extension ---
 # Pins the kiosk tabs (no close button) and reopens one if it is closed.
@@ -246,6 +280,6 @@ echo "==> Done! Please reboot to start kiosk mode:"
 echo "    sudo reboot"
 echo ""
 echo "    To change the tabs later, run this script again with the new URLs"
-echo "    To update the on-screen keyboard, run this script again (it pulls the latest version)"
-echo "    To set the keyboard language/size, open the extension's options from chrome://extensions"
+echo "    The on-screen keyboard uses the Danish (DK) layout"
+echo "    To update the on-screen keyboard, run this script again (it fetches the latest version)"
 echo "    To manage remotely, SSH in: ssh $KIOSK_USER@<ip-address>"
