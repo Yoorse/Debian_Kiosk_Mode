@@ -1,7 +1,8 @@
 #!/bin/bash
 # Kiosk setup script for Raspberry Pi 4 (Debian)
-# Wayland setup using labwc + squeekboard + Chromium
-# Includes autologin, SSH and an on-screen keyboard with a numpad.
+# Wayland setup using labwc + Chromium
+# Includes autologin, SSH and an on-screen keyboard (Chromium extension)
+# that pops up automatically when a text field is tapped and hides again.
 # Chromium opens one pinned tab per URL; a closed tab is reopened and
 # Chromium itself is restarted if it is closed.
 #
@@ -21,17 +22,16 @@ if [ $# -gt 0 ]; then
     KIOSK_URLS=("$@")
 fi
 KIOSK_USER="$(whoami)"
-# Keyboard layout names the numpad layout is installed under.
-# Squeekboard loads the file matching the active layout, so list every
-# layout the kiosk might use (space separated).
-KIOSK_KBD_LAYOUTS="${KIOSK_KBD_LAYOUTS:-us dk}"
+# On-screen keyboard: Manifest V3 port of the "Virtual Keyboard" extension
+# (xontab) that the old Raspbian kiosk used.
+VKB_REPO="${VKB_REPO:-https://github.com/foonerd/chrome-virtual-keyboard-v3}"
+VKB_SRC="$HOME/.local/share/kiosk-virtual-keyboard"
 
 echo "==> Wayland Kiosk setup starting..."
 echo "    User: $KIOSK_USER"
 for url in "${KIOSK_URLS[@]}"; do
     echo "    Tab:  $url"
 done
-echo "    Keyboard layouts: $KIOSK_KBD_LAYOUTS"
 echo ""
 
 # --- Install packages ---
@@ -39,11 +39,11 @@ echo "==> Installing packages..."
 sudo apt update
 sudo apt install -y \
     labwc \
-    squeekboard \
     chromium \
     seatd \
     openssh-server \
-    xdg-user-dirs
+    xdg-user-dirs \
+    git
 
 # --- Enable and start services ---
 echo "==> Enabling services..."
@@ -68,124 +68,28 @@ EOF
 
 sudo systemctl daemon-reload
 
-# --- Install squeekboard layout (letters + numpad) ---
-echo "==> Installing squeekboard layout with numpad..."
-KBD_DIR="$HOME/.local/share/squeekboard/keyboards"
-KBD_TMP="$(mktemp)"
-mkdir -p "$KBD_DIR"
-cat > "$KBD_TMP" <<'YAML'
----
-# Kiosk layout: letters on the left, numpad always visible on the right.
-# Install as ~/.local/share/squeekboard/keyboards/<layout>_wide.yaml
-#
-# Every row adds up to 720 units wide (528 letters + 192 numpad),
-# which is what keeps the numpad columns lined up. If you change a
-# row, keep that total.
+# --- Install the on-screen keyboard Chromium extension ---
+echo "==> Installing on-screen keyboard extension..."
+if [ -d "$VKB_SRC/.git" ]; then
+    git -C "$VKB_SRC" pull --ff-only
+else
+    rm -rf "$VKB_SRC"
+    git clone --depth 1 "$VKB_REPO" "$VKB_SRC"
+fi
 
-outlines:
-    default:   { width: 48,  height: 50 }
-    special:   { width: 48,  height: 50 }
-    wide:      { width: 96,  height: 50 }
-    spaceline: { width: 288, height: 50 }
-    altline:   { width: 64,  height: 50 }   # numpad keys
-
-views:
-    base:
-        - "q w e r t y u i o p å   np7 np8 np9"
-        - "a s d f g h j k l æ ø   np4 np5 np6"
-        - "Shift_L z x c v b n m BackSpace   np1 np2 np3"
-        - "show_symbols space period Return   np_comma np0 np_period"
-    upper:
-        - "Q W E R T Y U I O P Å   np7 np8 np9"
-        - "A S D F G H J K L Æ Ø   np4 np5 np6"
-        - "Shift_L Z X C V B N M BackSpace   np1 np2 np3"
-        - "show_symbols space period Return   np_comma np0 np_period"
-    symbols:
-        - "@ # $ % & - _ + = ( )   np7 np8 np9"
-        - "! ? , ' colon ; * / € < >   np4 np5 np6"
-        - "[ ] { } \\ | ~ ^ ° BackSpace   np1 np2 np3"
-        - "show_letters space period Return   np_comma np0 np_period"
-
-buttons:
-    Shift_L:
-        action:
-            locking:
-                lock_view: "upper"
-                unlock_view: "base"
-        outline: "wide"
-        icon: "key-shift"
-    BackSpace:
-        outline: "wide"
-        icon: "edit-clear-symbolic"
-        action: "erase"
-    show_symbols:
-        action:
-            set_view: "symbols"
-        outline: "wide"
-        label: "#+="
-    show_letters:
-        action:
-            set_view: "base"
-        outline: "wide"
-        label: "ABC"
-    period:
-        outline: "special"
-        text: "."
-    colon:
-        text: ":"
-    space:
-        outline: "spaceline"
-        text: " "
-    Return:
-        outline: "wide"
-        icon: "key-enter"
-        keysym: "Return"
-
-    # Numpad
-    np0:
-        outline: "altline"
-        text: "0"
-    np1:
-        outline: "altline"
-        text: "1"
-    np2:
-        outline: "altline"
-        text: "2"
-    np3:
-        outline: "altline"
-        text: "3"
-    np4:
-        outline: "altline"
-        text: "4"
-    np5:
-        outline: "altline"
-        text: "5"
-    np6:
-        outline: "altline"
-        text: "6"
-    np7:
-        outline: "altline"
-        text: "7"
-    np8:
-        outline: "altline"
-        text: "8"
-    np9:
-        outline: "altline"
-        text: "9"
-    np_comma:
-        outline: "altline"
-        text: ","
-    np_period:
-        outline: "altline"
-        text: "."
-YAML
-
-# One copy per layout name: plain (portrait) and _wide (landscape)
-for layout in $KIOSK_KBD_LAYOUTS; do
-    cp "$KBD_TMP" "$KBD_DIR/$layout.yaml"
-    cp "$KBD_TMP" "$KBD_DIR/${layout}_wide.yaml"
-done
-rm -f "$KBD_TMP"
+# The extension may live in the repo root or in a subfolder:
+# use the folder that holds manifest.json.
+VKB_MANIFEST="$(find "$VKB_SRC" -name manifest.json -not -path '*/.git/*' -not -path '*/node_modules/*' | head -n 1)"
+if [ -z "$VKB_MANIFEST" ]; then
+    echo "!! No manifest.json found in $VKB_SRC - cannot load the keyboard extension." >&2
+    exit 1
+fi
+VKB_DIR="$(dirname "$VKB_MANIFEST")"
+if ! grep -q '"manifest_version"[[:space:]]*:[[:space:]]*3' "$VKB_MANIFEST"; then
+    echo "!! $VKB_MANIFEST is not Manifest V3 - current Chromium will not load it." >&2
+    exit 1
+fi
+echo "    Keyboard extension: $VKB_DIR"
 
 # --- Install the keep-tabs Chromium extension ---
 # Pins the kiosk tabs (no close button) and reopens one if it is closed.
@@ -312,20 +216,18 @@ done
 echo "==> Configuring labwc autostart..."
 mkdir -p "$HOME/.config/labwc"
 cat > "$HOME/.config/labwc/autostart" <<EOF
-# Start squeekboard virtual keyboard.
-# SQUEEKBOARD_KEYBOARDSDIR points it at the kiosk layouts; without it the
-# Raspberry Pi build only looks in /usr/share/misc/squeekboard/keyboards.
-SQUEEKBOARD_KEYBOARDSDIR="$KBD_DIR" squeekboard &
-
 # Start Chromium with one tab per URL (no --kiosk, so the tab bar shows).
-# The loop starts it again if it is closed or crashes.
+# Two unpacked extensions are loaded: keep-tabs and the on-screen keyboard.
+# The keyboard pops up when a text field is tapped and hides afterwards.
+# The loop starts Chromium again if it is closed or crashes.
 while pgrep -x labwc > /dev/null; do
   chromium \\
     --noerrdialogs \\
     --disable-infobars \\
     --disable-session-crashed-bubble \\
     --touch-events=enabled \\
-    --load-extension="$EXT_DIR" \\
+    --disable-features=DisableLoadExtensionCommandLineSwitch \\
+    --load-extension="$EXT_DIR,$VKB_DIR" \\
    $URL_ARGS
   sleep 2
 done &
@@ -344,5 +246,6 @@ echo "==> Done! Please reboot to start kiosk mode:"
 echo "    sudo reboot"
 echo ""
 echo "    To change the tabs later, run this script again with the new URLs"
-echo "    To change the on-screen keyboard, edit the files in $KBD_DIR"
+echo "    To update the on-screen keyboard, run this script again (it pulls the latest version)"
+echo "    To set the keyboard language/size, open the extension's options from chrome://extensions"
 echo "    To manage remotely, SSH in: ssh $KIOSK_USER@<ip-address>"
