@@ -18,18 +18,18 @@
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Yoorse/Debian_Kiosk_Mode
+git clone https://github.com/Yoorse/Debian_Kiosk_mode
 cd Debian_Kiosk_Mode
 ```
 
 ### 2. Configure
 
-Open `kiosk.sh` and change the values to match your setup:
+Open `kiosk_wayland.sh` and change the values to match your setup:
 
 ```bash
-nano kiosk.sh
+nano kiosk_wayland.sh
 # or
-vim kiosk.sh
+vim kiosk_wayland.sh
 ```
 
 The main thing to set is your kiosk URL:
@@ -41,13 +41,13 @@ KIOSK_URL="https://yoursite.com"
 ### 3. Make the script executable
 
 ```bash
-chmod +x kiosk.sh
+chmod +x kiosk_wayland.sh
 ```
 
 ### 4. Run
 
 ```bash
-./kiosk.sh
+./kiosk_wayland.sh
 ```
 
 Then reboot:
